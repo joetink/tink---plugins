@@ -1,0 +1,381 @@
+desc:Tink Channel v3.1 Fixed Syntax - Low CPU Zero Latency 4xOS Render Only
+
+slider1:0<-24,24,0.1>Input Gain dB
+slider2:-60<-90,-20,0.5>Gate Threshold dB
+slider3:3<0,12,0.5>Gate Hysteresis dB
+slider4:1<0.1,100,0.1>Gate Attack ms
+slider5:150<10,1000,1>Gate Release ms
+slider6:-80<-120,0,1>Gate Range dB
+slider7:0<0,1,1{Off,On}>Gate Bypass
+slider8:0<0,1,1{Off,On}>LoFi Enable
+slider9:50<0,100,1>LoFi Amount
+slider10:0<0,1,0.01>Preamp Drive
+slider11:0<0,2,1{Neutral,Keep Low,Keep High}>Preamp Focus
+slider12:0<0,1,1{Off,On}>Preamp Bypass
+slider15:20<20,500,1>HPF Hz
+slider16:20000<2000,20000,1>LPF Hz
+slider17:0<0,1,1{Off,On}>Filters Bypass
+slider20:80<20,20000,1>Band1 Freq
+slider21:0<-15,15,0.1>Band1 Gain
+slider22:1<0.1,10,0.1>Band1 Q
+slider23:0<0,2,1{Peak,LowShelf,HighShelf}>Band1 Type
+slider24:250<20,20000,1>Band2 Freq
+slider25:0<-15,15,0.1>Band2 Gain
+slider26:1<0.1,10,0.1>Band2 Q
+slider27:0<0,2,1{Peak,LowShelf,HighShelf}>Band2 Type
+slider28:1000<20,20000,1>Band3 Freq
+slider29:0<-15,15,0.1>Band3 Gain
+slider30:1<0.1,10,0.1>Band3 Q
+slider31:0<0,2,1{Peak,Notch,HighShelf}>Band3 Type
+slider32:3000<20,20000,1>Band4 Freq
+slider33:0<-15,15,0.1>Band4 Gain
+slider34:1<0.1,10,0.1>Band4 Q
+slider35:0<0,2,1{Peak,Notch,LowShelf}>Band4 Type
+slider36:8000<20,20000,1>Band5 Freq
+slider37:0<-15,15,0.1>Band5 Gain
+slider38:1<0.1,10,0.1>Band5 Q
+slider39:0<0,2,1{Peak,Notch,HighShelf}>Band5 Type
+slider40:12000<20,20000,1>Band6 Freq
+slider41:0<-15,15,0.1>Band6 Gain
+slider42:1<0.1,10,0.1>Band6 Q
+slider43:0<0,2,1{Peak,Notch,HighShelf}>Band6 Type
+slider44:0<0,1,1{Off,On}>EQ Bypass
+slider50:0<0,3,1{1176 FB,LA2A FB Dual,LA3A FF,SSL G Auto}>Comp Model
+slider51:-18<-40,0,0.1>Comp Threshold dB
+slider52:4<1,20,0.1>Comp Ratio
+slider53:0.08<0.02,30,0.01>Comp Attack ms
+slider54:100<10,3000,1>Comp Release ms
+slider55:0<-12,24,0.1>Comp Makeup dB
+slider56:0<0,1,1{Off,On}>Turbo 100:1 +6dB
+slider57:0<0,1,1{Off,On}>Comp Bypass
+slider60:6500<1000,12000,10>DeEss Freq Hz
+slider61:-28<-45,0,0.5>DeEss Threshold dB
+slider62:0<0,1,1{Off,On}>DeEss Listen
+slider63:0<0,1,1{Off,On}>DeEss Bypass
+slider70:0<0,1,1{Off,On}>Delay Bypass
+slider71:0<0,1,1{Free,Sync}>Delay Sync
+slider72:350<1,2000,1>Delay Time Free ms
+slider73:4<0,11,1{1/64,1/32T,1/32,1/16T,1/16,1/8T,1/8,1/8.,1/4,1/4.,1/2,1/2.}>Delay Time Sync
+slider74:25<0,95,0.5>Delay Feedback %
+slider75:50<0,100,1>Delay Stereo Spread %
+slider76:20<0,100,1>Delay Mix %
+slider77:20<20,2000,1>Delay HPF Hz
+slider78:8000<2000,20000,1>Delay LPF Hz
+slider80:0<-24,24,0.1>Output Drive dB
+slider81:0<-24,24,0.1>Output Trim dB
+slider82:0<0,5,1{Hard,Quintic,Cubic,Tangent,Algebraic,Arctangent}>Clipper Type
+slider83:0.5<0,1,0.01>Hard-Soft Blend
+slider84:0<0,1,1{Off,On}>Clipper Bypass
+slider90:0<-60,0,0.1>Meter Comp GR Current
+slider91:0<-60,0,0.1>Meter Comp GR Max 2s
+slider92:0<-60,0,0.1>Meter DeEss GR Current
+slider93:0<-60,0,0.1>Meter DeEss GR Max 2s
+slider94:0<0,1,1{No,Yes}>isRendering 4xOS Active
+
+@init
+pi = 3.14159265359;
+ext_tail_size = 0;
+srate_os = 4;
+
+function dB2lin(db) ( exp(db * 0.1151292546497022842); );
+function lin2dB(lin) ( log(max(lin,0.000000000001))*8.68588963806; );
+function clamp(x,a,b) ( x<a ? a : x>b ? b : x );
+
+oversample_active = 0;
+gate_env = 0;
+gate_gain = 1;
+lofi_phase = 0;
+lofi_hold_l = 0;
+lofi_hold_r = 0;
+lofi_lp = 0;
+pre_tilt_l = 0;
+pre_tilt_r = 0;
+sat_prev_x_l = 0;
+sat_prev_x_r = 0;
+hpf_b0=0; hpf_b1=0; hpf_b2=0; hpf_a1=0; hpf_a2=0;
+hpf_z1_l=0; hpf_z2_l=0; hpf_z1_r=0; hpf_z2_r=0;
+lpf_b0=0; lpf_b1=0; lpf_b2=0; lpf_a1=0; lpf_a2=0;
+lpf_z1_l=0; lpf_z2_l=0; lpf_z1_r=0; lpf_z2_r=0;
+eq_b0_0=1; eq_b1_0=0; eq_b2_0=0; eq_a1_0=0; eq_a2_0=0;
+eq_b0_1=1; eq_b1_1=0; eq_b2_1=0; eq_a1_1=0; eq_a2_1=0;
+eq_b0_2=1; eq_b1_2=0; eq_b2_2=0; eq_a1_2=0; eq_a2_2=0;
+eq_b0_3=1; eq_b1_3=0; eq_b2_3=0; eq_a1_3=0; eq_a2_3=0;
+eq_b0_4=1; eq_b1_4=0; eq_b2_4=0; eq_a1_4=0; eq_a2_4=0;
+eq_b0_5=1; eq_b1_5=0; eq_b2_5=0; eq_a1_5=0; eq_a2_5=0;
+eq_z1_l_0=0; eq_z2_l_0=0; eq_z1_r_0=0; eq_z2_r_0=0;
+eq_z1_l_1=0; eq_z2_l_1=0; eq_z1_r_1=0; eq_z2_r_1=0;
+eq_z1_l_2=0; eq_z2_l_2=0; eq_z1_r_2=0; eq_z2_r_2=0;
+eq_z1_l_3=0; eq_z2_l_3=0; eq_z1_r_3=0; eq_z2_r_3=0;
+eq_z1_l_4=0; eq_z2_l_4=0; eq_z1_r_4=0; eq_z2_r_4=0;
+eq_z1_l_5=0; eq_z2_l_5=0; eq_z1_r_5=0; eq_z2_r_5=0;
+comp_env_link=0; comp_gain=1; comp_gr=0; comp_gr_max=0; comp_gr_timer=0;
+comp_prev_out_l=0; comp_prev_out_r=0;
+la2_fast=0; la2_slow=0;
+deess_env=0; deess_gain=1; deess_gr=0; deess_gr_max=0; deess_timer=0;
+deess_bp_b0=0; deess_bp_b1=0; deess_bp_b2=0; deess_bp_a1=0; deess_bp_a2=0;
+deess_bp_z1=0; deess_bp_z2=0;
+delay_buf_size=768000;
+delay_write=0;
+delay_hp_z_l=0; delay_lp_z_l=0; delay_hp_z_r=0; delay_lp_z_r=0;
+delay_hp_c=0; delay_lp_c=0;
+clip_prev_x_l=0; clip_prev_x_r=0;
+clip_hist_size=800;
+clip_hist_write=0;
+mem_offset_l=0;
+mem_offset_r=768000;
+clip_hist_offset=1536000;
+i=0; loop(1536800, mem[i]=0; i+=1;);
+
+function dsat(x) ( x / (1+abs(x)); );
+function dsat_ad_aa(x, prev_x)
+  local(Fx,Fx1,denom)
+  (
+  denom = x - prev_x;
+  abs(denom) < 0.0000001 ? dsat((x+prev_x)*0.5) : (
+    Fx = (abs(x) - log(1+abs(x))) * (x>=0?1:-1);
+    Fx1 = (abs(prev_x) - log(1+abs(prev_x))) * (prev_x>=0?1:-1);
+    (Fx - Fx1)/denom
+  );
+  );
+
+function calc_hp(freq,Q,srate)
+  local(w0,cs,sn,al,b0,b1,b2,a0,a1,a2)
+  (
+  w0=2*pi*freq/srate; cs=cos(w0); sn=sin(w0); al=sn/(2*Q);
+  b0=(1+cs)*0.5; b1=-(1+cs); b2=b0; a0=1+al; a1=-2*cs; a2=1-al;
+  hpf_b0=b0/a0; hpf_b1=b1/a0; hpf_b2=b2/a0; hpf_a1=a1/a0; hpf_a2=a2/a0;
+  );
+
+function calc_lp(freq,Q,srate)
+  local(w0,cs,sn,al,b0,b1,b2,a0,a1,a2)
+  (
+  w0=2*pi*freq/srate; cs=cos(w0); sn=sin(w0); al=sn/(2*Q);
+  b0=(1-cs)*0.5; b1=1-cs; b2=b0; a0=1+al; a1=-2*cs; a2=1-al;
+  lpf_b0=b0/a0; lpf_b1=b1/a0; lpf_b2=b2/a0; lpf_a1=a1/a0; lpf_a2=a2/a0;
+  );
+
+function calc_peq0(freq,gainDB,Q,srate)
+  local(A,w0,cs,sn,al,b0,b1,b2,a0,a1,a2)
+  (A=exp(gainDB/40*log(10)); w0=2*pi*freq/srate; cs=cos(w0); sn=sin(w0); al=sn/(2*Q);
+  b0=1+al*A; b1=-2*cs; b2=1-al*A; a0=1+al/A; a1=-2*cs; a2=1-al/A;
+  eq_b0_0=b0/a0; eq_b1_0=b1/a0; eq_b2_0=b2/a0; eq_a1_0=a1/a0; eq_a2_0=a2/a0;);
+
+function calc_peq1(freq,gainDB,Q,srate)
+  local(A,w0,cs,sn,al,b0,b1,b2,a0,a1,a2)
+  (A=exp(gainDB/40*log(10)); w0=2*pi*freq/srate; cs=cos(w0); sn=sin(w0); al=sn/(2*Q);
+  b0=1+al*A; b1=-2*cs; b2=1-al*A; a0=1+al/A; a1=-2*cs; a2=1-al/A;
+  eq_b0_1=b0/a0; eq_b1_1=b1/a0; eq_b2_1=b2/a0; eq_a1_1=a1/a0; eq_a2_1=a2/a0;);
+
+function calc_peq2(freq,gainDB,Q,srate)
+  local(A,w0,cs,sn,al,b0,b1,b2,a0,a1,a2)
+  (A=exp(gainDB/40*log(10)); w0=2*pi*freq/srate; cs=cos(w0); sn=sin(w0); al=sn/(2*Q);
+  slider31==1 ? (b0=1; b1=-2*cs; b2=1; a0=1+al; a1=-2*cs; a2=1-al;) : (b0=1+al*A; b1=-2*cs; b2=1-al*A; a0=1+al/A; a1=-2*cs; a2=1-al/A;);
+  eq_b0_2=b0/a0; eq_b1_2=b1/a0; eq_b2_2=b2/a0; eq_a1_2=a1/a0; eq_a2_2=a2/a0;);
+
+function calc_peq3(freq,gainDB,Q,srate)
+  local(A,w0,cs,sn,al,b0,b1,b2,a0,a1,a2)
+  (A=exp(gainDB/40*log(10)); w0=2*pi*freq/srate; cs=cos(w0); sn=sin(w0); al=sn/(2*Q);
+  slider35==1 ? (b0=1; b1=-2*cs; b2=1; a0=1+al; a1=-2*cs; a2=1-al;) : (b0=1+al*A; b1=-2*cs; b2=1-al*A; a0=1+al/A; a1=-2*cs; a2=1-al/A;);
+  eq_b0_3=b0/a0; eq_b1_3=b1/a0; eq_b2_3=b2/a0; eq_a1_3=a1/a0; eq_a2_3=a2/a0;);
+
+function calc_peq4(freq,gainDB,Q,srate)
+  local(A,w0,cs,sn,al,b0,b1,b2,a0,a1,a2)
+  (A=exp(gainDB/40*log(10)); w0=2*pi*freq/srate; cs=cos(w0); sn=sin(w0); al=sn/(2*Q);
+  slider39==1 ? (b0=1; b1=-2*cs; b2=1; a0=1+al; a1=-2*cs; a2=1-al;) : (b0=1+al*A; b1=-2*cs; b2=1-al*A; a0=1+al/A; a1=-2*cs; a2=1-al/A;);
+  eq_b0_4=b0/a0; eq_b1_4=b1/a0; eq_b2_4=b2/a0; eq_a1_4=a1/a0; eq_a2_4=a2/a0;);
+
+function calc_peq5(freq,gainDB,Q,srate)
+  local(A,w0,cs,sn,al,b0,b1,b2,a0,a1,a2)
+  (A=exp(gainDB/40*log(10)); w0=2*pi*freq/srate; cs=cos(w0); sn=sin(w0); al=sn/(2*Q);
+  slider43==1 ? (b0=1; b1=-2*cs; b2=1; a0=1+al; a1=-2*cs; a2=1-al;) : (b0=1+al*A; b1=-2*cs; b2=1-al*A; a0=1+al/A; a1=-2*cs; a2=1-al/A;);
+  eq_b0_5=b0/a0; eq_b1_5=b1/a0; eq_b2_5=b2/a0; eq_a1_5=a1/a0; eq_a2_5=a2/a0;);
+
+function calc_bp(freq,Q,srate)
+  local(w0,cs,sn,al,b0,b1,b2,a0,a1,a2)
+  (w0=2*pi*freq/srate; cs=cos(w0); sn=sin(w0); al=sn/(2*Q);
+  b0=Q*al; b1=0; b2=-Q*al; a0=1+al; a1=-2*cs; a2=1-al;
+  deess_bp_b0=b0/a0; deess_bp_b1=b1/a0; deess_bp_b2=b2/a0; deess_bp_a1=a1/a0; deess_bp_a2=a2/a0;);
+
+function clip_shape(x,type)
+  local(y,absx)
+  (
+  type==0 ? ( y=x>1?1:x<-1?-1:x; ) :
+  type==1 ? ( absx=abs(x); absx>1?y=(x>0?1:-1):y=x-0.2*x*x*x*x*x; ) :
+  type==2 ? ( absx=abs(x); absx>1?y=(x>0?1:-1):y=x-0.333333*x*x*x; ) :
+  type==3 ? ( y=tan(x*0.785398)*0.6; y>1?1:y<-1?-1:y; ) :
+  type==4 ? ( y=x/sqrt(1+x*x); ) :
+  ( y=atan(x)*0.636619772367; ); y;
+  );
+
+function clip_F(x,type)
+  local(F)
+  (
+  type==0 ? ( F=abs(x)<=1?0.5*x*x:(abs(x)-0.5); ) :
+  type==1 ? ( F=0.5*x*x - 0.0333333*x*x*x*x*x*x; ) :
+  type==2 ? ( F=0.5*x*x - 0.0833333*x*x*x*x; ) :
+  type==4 ? ( F=sqrt(1+x*x); ) :
+  type==5 ? ( F=x*atan(x)*0.6366197 - 0.3183098*log(1+x*x); ) :
+  ( F=0; ); F;
+  );
+
+function clip_ad_aa(x,prev_x,type)
+  local(denom,Fx,Fx1)
+  (
+  denom=x-prev_x; abs(denom)<0.0000001 ? clip_shape((x+prev_x)*0.5,type) : (
+    type==0||type==1||type==2||type==4||type==5 ? ( Fx=clip_F(x,type); Fx1=clip_F(prev_x,type); (Fx-Fx1)/denom; ) : ( (clip_shape(x,type)+clip_shape(prev_x,type))*0.5 )
+  );
+  );
+
+@slider
+oversample_active = (play_state & 4) ? 1 : 0;
+slider94 = oversample_active;
+srate_calc = srate * (oversample_active ? srate_os : 1);
+calc_hp(slider15,0.707,srate_calc);
+calc_lp(slider16,0.707,srate_calc);
+calc_peq0(slider20,slider21,slider22,srate_calc);
+calc_peq1(slider24,slider25,slider26,srate_calc);
+calc_peq2(slider28,slider29,slider30,srate_calc);
+calc_peq3(slider32,slider33,slider34,srate_calc);
+calc_peq4(slider36,slider37,slider38,srate_calc);
+calc_peq5(slider40,slider41,slider42,srate_calc);
+calc_bp(slider60,2,srate_calc);
+delay_hp_c = exp(-2*pi*slider77/srate_calc);
+delay_lp_c = 1 - exp(-2*pi*slider78/srate_calc);
+
+@block
+oversample_active = (play_state & 4) ? 1 : 0;
+srate_local = srate * (oversample_active ? srate_os : 1);
+tempo = get_host_tempo(); tempo==0 ? tempo=120;
+sync_beats_0=0.0625; sync_beats_1=0.09375; sync_beats_2=0.125; sync_beats_3=0.1875; sync_beats_4=0.25; sync_beats_5=0.375; sync_beats_6=0.5; sync_beats_7=0.75; sync_beats_8=1; sync_beats_9=1.5; sync_beats_10=2; sync_beats_11=3;
+slider73==0 ? beats=sync_beats_0 : slider73==1 ? beats=sync_beats_1 : slider73==2 ? beats=sync_beats_2 : slider73==3 ? beats=sync_beats_3 : slider73==4 ? beats=sync_beats_4 : slider73==5 ? beats=sync_beats_5 : slider73==6 ? beats=sync_beats_6 : slider73==7 ? beats=sync_beats_7 : slider73==8 ? beats=sync_beats_8 : slider73==9 ? beats=sync_beats_9 : slider73==10 ? beats=sync_beats_10 : beats=sync_beats_11;
+delay_time_sec = slider71==1 ? beats*(60/tempo) : slider72/1000;
+delay_samples = floor(delay_time_sec * srate_local);
+
+@sample
+prev_in_l = spl0;
+prev_in_r = spl1;
+samples_loop = oversample_active ? srate_os : 1;
+accum_l = 0;
+accum_r = 0;
+loop_i = 0;
+loop(samples_loop,
+  frac = loop_i / srate_os;
+  cur_l = oversample_active ? prev_in_l + (spl0 - prev_in_l)*frac : spl0;
+  cur_r = oversample_active ? prev_in_r + (spl1 - prev_in_r)*frac : spl1;
+  cur_l *= dB2lin(slider1);
+  cur_r *= dB2lin(slider1);
+  slider7==0 ? (
+    env_in = max(abs(cur_l),abs(cur_r));
+    atk = exp(-1/(srate_local * max(slider4,0.1)/1000));
+    rel = exp(-1/(srate_local * max(slider5,10)/1000));
+    env_in > gate_env ? gate_env = atk*gate_env + (1-atk)*env_in : gate_env = rel*gate_env + (1-rel)*env_in;
+    target = gate_env > dB2lin(slider2) ? 1 : (gate_env < dB2lin(slider2-slider3) ? dB2lin(slider6) : gate_gain);
+    gate_gain = gate_gain*0.999 + target*0.001;
+    cur_l *= gate_gain; cur_r *= gate_gain;
+  );
+  slider8==1 ? (
+    amt = slider9/100;
+    decimation = 1 + amt*30;
+    lofi_phase += 1;
+    lofi_phase >= decimation ? (
+      lofi_phase=0; lofi_hold_l=cur_l; lofi_hold_r=cur_r;
+      bits = 16 - floor(amt*8);
+      scale = 2 ^ bits;
+      lofi_hold_l = floor(lofi_hold_l*scale)/scale;
+      lofi_hold_r = floor(lofi_hold_r*scale)/scale;
+    );
+    cur_l = lofi_hold_l*(0.2+amt*0.8) + cur_l*(1-amt*0.8);
+    cur_r = lofi_hold_r*(0.2+amt*0.8) + cur_r*(1-amt*0.8);
+  );
+  slider12==0 ? (
+    drive = slider10*12;
+    lp_coeff = exp(-2*pi*800/srate_local);
+    pre_tilt_l = pre_tilt_l + lp_coeff*(cur_l - pre_tilt_l);
+    hp_l = cur_l - pre_tilt_l;
+    pre_tilt_r = pre_tilt_r + lp_coeff*(cur_r - pre_tilt_r);
+    hp_r = cur_r - pre_tilt_r;
+    slider11==1 ? ( sat_in_l=hp_l*(1+drive*2)+pre_tilt_l*0.2; sat_in_r=hp_r*(1+drive*2)+pre_tilt_r*0.2; ) :
+    slider11==2 ? ( sat_in_l=pre_tilt_l*(1+drive*2)+hp_l*0.2; sat_in_r=pre_tilt_r*(1+drive*2)+hp_r*0.2; ) :
+    ( sat_in_l=cur_l*(1+drive); sat_in_r=cur_r*(1+drive); );
+    y_l = dsat_ad_aa(sat_in_l,sat_prev_x_l); y_r = dsat_ad_aa(sat_in_r,sat_prev_x_r);
+    sat_prev_x_l=sat_in_l; sat_prev_x_r=sat_in_r;
+    slider10>0.9 ? ( extra=(slider10-0.9)*20; y_l=dsat(y_l*(1+extra))*1.05; y_r=dsat(y_r*(1+extra))*1.05; );
+    cur_l=cur_l*(1-slider10*0.4)+y_l*slider10*0.8;
+    cur_r=cur_r*(1-slider10*0.4)+y_r*slider10*0.8;
+  );
+  slider17==0 ? (
+    tmp=cur_l*hpf_b0+hpf_z1_l; hpf_z1_l=cur_l*hpf_b1+hpf_z2_l-tmp*hpf_a1; hpf_z2_l=cur_l*hpf_b2-tmp*hpf_a2; cur_l=tmp;
+    tmp=cur_r*hpf_b0+hpf_z1_r; hpf_z1_r=cur_r*hpf_b1+hpf_z2_r-tmp*hpf_a1; hpf_z2_r=cur_r*hpf_b2-tmp*hpf_a2; cur_r=tmp;
+    tmp=cur_l*lpf_b0+lpf_z1_l; lpf_z1_l=cur_l*lpf_b1+lpf_z2_l-tmp*lpf_a1; lpf_z2_l=cur_l*lpf_b2-tmp*lpf_a2; cur_l=tmp;
+    tmp=cur_r*lpf_b0+lpf_z1_r; lpf_z1_r=cur_r*lpf_b1+lpf_z2_r-tmp*lpf_a1; lpf_z2_r=cur_r*lpf_b2-tmp*lpf_a2; cur_r=tmp;
+  );
+  // EQ 6 bands unrolled for syntax safety
+  tmp=cur_l*eq_b0_0+eq_z1_l_0; eq_z1_l_0=cur_l*eq_b1_0+eq_z2_l_0-tmp*eq_a1_0; eq_z2_l_0=cur_l*eq_b2_0-tmp*eq_a2_0; cur_l=tmp;
+  tmp=cur_r*eq_b0_0+eq_z1_r_0; eq_z1_r_0=cur_r*eq_b1_0+eq_z2_r_0-tmp*eq_a1_0; eq_z2_r_0=cur_r*eq_b2_0-tmp*eq_a2_0; cur_r=tmp;
+  tmp=cur_l*eq_b0_1+eq_z1_l_1; eq_z1_l_1=cur_l*eq_b1_1+eq_z2_l_1-tmp*eq_a1_1; eq_z2_l_1=cur_l*eq_b2_1-tmp*eq_a2_1; cur_l=tmp;
+  tmp=cur_r*eq_b0_1+eq_z1_r_1; eq_z1_r_1=cur_r*eq_b1_1+eq_z2_r_1-tmp*eq_a1_1; eq_z2_r_1=cur_r*eq_b2_1-tmp*eq_a2_1; cur_r=tmp;
+  tmp=cur_l*eq_b0_2+eq_z1_l_2; eq_z1_l_2=cur_l*eq_b1_2+eq_z2_l_2-tmp*eq_a1_2; eq_z2_l_2=cur_l*eq_b2_2-tmp*eq_a2_2; cur_l=tmp;
+  tmp=cur_r*eq_b0_2+eq_z1_r_2; eq_z1_r_2=cur_r*eq_b1_2+eq_z2_r_2-tmp*eq_a1_2; eq_z2_r_2=cur_r*eq_b2_2-tmp*eq_a2_2; cur_r=tmp;
+  tmp=cur_l*eq_b0_3+eq_z1_l_3; eq_z1_l_3=cur_l*eq_b1_3+eq_z2_l_3-tmp*eq_a1_3; eq_z2_l_3=cur_l*eq_b2_3-tmp*eq_a2_3; cur_l=tmp;
+  tmp=cur_r*eq_b0_3+eq_z1_r_3; eq_z1_r_3=cur_r*eq_b1_3+eq_z2_r_3-tmp*eq_a1_3; eq_z2_r_3=cur_r*eq_b2_3-tmp*eq_a2_3; cur_r=tmp;
+  tmp=cur_l*eq_b0_4+eq_z1_l_4; eq_z1_l_4=cur_l*eq_b1_4+eq_z2_l_4-tmp*eq_a1_4; eq_z2_l_4=cur_l*eq_b2_4-tmp*eq_a2_4; cur_l=tmp;
+  tmp=cur_r*eq_b0_4+eq_z1_r_4; eq_z1_r_4=cur_r*eq_b1_4+eq_z2_r_4-tmp*eq_a1_4; eq_z2_r_4=cur_r*eq_b2_4-tmp*eq_a2_4; cur_r=tmp;
+  tmp=cur_l*eq_b0_5+eq_z1_l_5; eq_z1_l_5=cur_l*eq_b1_5+eq_z2_l_5-tmp*eq_a1_5; eq_z2_l_5=cur_l*eq_b2_5-tmp*eq_a2_5; cur_l=tmp;
+  tmp=cur_r*eq_b0_5+eq_z1_r_5; eq_z1_r_5=cur_r*eq_b1_5+eq_z2_r_5-tmp*eq_a1_5; eq_z2_r_5=cur_r*eq_b2_5-tmp*eq_a2_5; cur_r=tmp;
+
+  slider57==0 ? (
+    turbo=slider56==1?2:1; in_l_t=cur_l*turbo; in_r_t=cur_r*turbo;
+    slider50==0 ? ( det_l=abs(comp_prev_out_l); det_r=abs(comp_prev_out_r); ) : slider50==1 ? ( det_l=abs(comp_prev_out_l); det_r=abs(comp_prev_out_r); ) : ( det_l=abs(in_l_t); det_r=abs(in_r_t); );
+    det_link=(det_l+det_r)*0.5;
+    slider50==0 ? (
+      atk_ms=clamp(slider53,0.02,0.8); rel_ms=slider54; atk_c=exp(-1/(srate_local*atk_ms/1000)); rel_c=exp(-1/(srate_local*rel_ms/1000));
+      det_link>comp_env_link ? comp_env_link=atk_c*comp_env_link+(1-atk_c)*det_link : comp_env_link=rel_c*comp_env_link+(1-rel_c)*det_link;
+    ) : slider50==1 ? (
+      atk_c=exp(-1/(srate_local*0.01)); gr_est=lin2dB(comp_env_link+0.000000001)-slider51; rel_fast_c=exp(-1/(srate_local*0.06)); rel_slow_ms=gr_est>10?3500:gr_est>5?1500:600; rel_slow_c=exp(-1/(srate_local*rel_slow_ms/1000));
+      det_link>comp_env_link ? ( la2_fast=atk_c*la2_fast+(1-atk_c)*det_link; la2_slow=atk_c*la2_slow+(1-atk_c)*det_link; ) : ( la2_fast=rel_fast_c*la2_fast+(1-rel_fast_c)*det_link; la2_slow=rel_slow_c*la2_slow+(1-rel_slow_c)*det_link; );
+      comp_env_link=la2_fast*0.5+la2_slow*0.5;
+    ) : slider50==2 ? (
+      atk_c=exp(-1/(srate_local*0.0015)); gr_est=lin2dB(comp_env_link+0.000000001)-slider51; rel_ms=gr_est>10?2000:400; rel_c=exp(-1/(srate_local*rel_ms/1000));
+      det_link>comp_env_link ? comp_env_link=atk_c*comp_env_link+(1-atk_c)*det_link : comp_env_link=rel_c*comp_env_link+(1-rel_c)*det_link;
+    ) : (
+      atk_ms=slider53; atk_c=exp(-1/(srate_local*atk_ms/1000)); slider54<50 ? ( crest=det_link/(comp_env_link+0.000000001); rel_ms=crest>1.8?100:crest>1.3?300:1200; ) : rel_ms=slider54; rel_c=exp(-1/(srate_local*rel_ms/1000));
+      det_link>comp_env_link ? comp_env_link=atk_c*comp_env_link+(1-atk_c)*det_link : comp_env_link=rel_c*comp_env_link+(1-rel_c)*det_link;
+    );
+    ratio=slider56==1?100:(slider50==1?3.5:slider50==2?6:slider52); env_db=lin2dB(comp_env_link+0.000000001); over_db=env_db-slider51; over_db>0 ? ( gr_db=over_db*(1-1/ratio); target_gain=dB2lin(-gr_db); ) : target_gain=1;
+    comp_gain=comp_gain*0.92+target_gain*0.08; comp_gr=lin2dB(comp_gain); cur_l*=comp_gain; cur_r*=comp_gain; comp_prev_out_l=cur_l; comp_prev_out_r=cur_r; mk=dB2lin(slider55); cur_l*=mk; cur_r*=mk;
+    comp_gr_timer+=1/srate_local; comp_gr_timer>2 ? ( comp_gr_max=comp_gr; comp_gr_timer=0; ) : comp_gr_max=min(comp_gr_max,comp_gr); slider90=comp_gr; slider91=comp_gr_max;
+  );
+  slider63==0 ? (
+    side=(cur_l+cur_r)*0.5; tmp=side*deess_bp_b0+deess_bp_z1; deess_bp_z1=side*deess_bp_b1+deess_bp_z2-tmp*deess_bp_a1; deess_bp_z2=side*deess_bp_b2-tmp*deess_bp_a2; side_bp=tmp;
+    det=abs(side_bp); atk_c=exp(-1/(srate_local*0.001)); rel_c=exp(-1/(srate_local*0.03)); det>deess_env ? deess_env=atk_c*deess_env+(1-atk_c)*det : deess_env=rel_c*deess_env+(1-rel_c)*det;
+    thresh_lin=dB2lin(slider61); deess_env>thresh_lin ? ( over_db=lin2dB(deess_env)-slider61; gr_db=-over_db*1.5; deess_gain_target=dB2lin(gr_db); ) : deess_gain_target=1;
+    deess_gain=deess_gain*0.8+deess_gain_target*0.2; deess_gr=lin2dB(deess_gain);
+    slider62==1 ? ( cur_l=side_bp*2; cur_r=side_bp*2; ) : ( cur_l*=deess_gain; cur_r*=deess_gain; );
+    deess_timer+=1/srate_local; deess_timer>2 ? ( deess_gr_max=deess_gr; deess_timer=0; ) : deess_gr_max=min(deess_gr_max,deess_gr); slider92=deess_gr; slider93=deess_gr_max;
+  );
+  slider70==0 ? (
+    mem[mem_offset_l+delay_write]=cur_l + mem[mem_offset_l+((delay_write-delay_samples+delay_buf_size)%delay_buf_size)]*(slider74/100)*0.5;
+    mem[mem_offset_r+delay_write]=cur_r + mem[mem_offset_r+((delay_write-delay_samples+delay_buf_size)%delay_buf_size)]*(slider74/100)*0.5;
+    read_idx=(delay_write-delay_samples+delay_buf_size)%delay_buf_size; d_l=mem[mem_offset_l+read_idx]; d_r=mem[mem_offset_r+read_idx];
+    spread_samps=floor(slider75/100*0.02*srate_local); read_idx_spread=(read_idx-spread_samps+delay_buf_size)%delay_buf_size; d_r_spread=mem[mem_offset_r+read_idx_spread]; d_r=d_r*(1-slider75/200)+d_r_spread*(slider75/200);
+    // one-pole HP/LP low CPU
+    delay_hp_z_l = delay_hp_z_l + delay_hp_c*(d_l - delay_hp_z_l); hp_out = d_l - delay_hp_z_l; d_l=hp_out;
+    delay_lp_z_l = delay_lp_z_l + delay_lp_c*(d_l - delay_lp_z_l); d_l=delay_lp_z_l;
+    delay_hp_z_r = delay_hp_z_r + delay_hp_c*(d_r - delay_hp_z_r); hp_out = d_r - delay_hp_z_r; d_r=hp_out;
+    delay_lp_z_r = delay_lp_z_r + delay_lp_c*(d_r - delay_lp_z_r); d_r=delay_lp_z_r;
+    mix=slider76/100; cur_l=cur_l*(1-mix)+d_l*mix; cur_r=cur_r*(1-mix)+d_r*mix;
+    delay_write=(delay_write+1)%delay_buf_size;
+  );
+  slider84==0 ? (
+    drive_in_l=cur_l*dB2lin(slider80); drive_in_r=cur_r*dB2lin(slider80); type=slider82; hs=slider83;
+    clipped_l=clip_ad_aa(drive_in_l,clip_prev_x_l,type); hard_l=drive_in_l>1?1:drive_in_l<-1?-1:drive_in_l; y_l=hard_l*(1-hs)+clipped_l*hs;
+    clipped_r=clip_ad_aa(drive_in_r,clip_prev_x_r,type); hard_r=drive_in_r>1?1:drive_in_r<-1?-1:drive_in_r; y_r=hard_r*(1-hs)+clipped_r*hs;
+    clip_prev_x_l=drive_in_l; clip_prev_x_r=drive_in_r;
+    oversample_active==0 ? ( mem[clip_hist_offset+clip_hist_write]=(abs(y_l)+abs(y_r))*0.5; clip_hist_write=(clip_hist_write+1)%clip_hist_size; );
+    cur_l=y_l*dB2lin(slider81); cur_r=y_r*dB2lin(slider81);
+  ) : ( cur_l*=dB2lin(slider81); cur_r*=dB2lin(slider81); );
+  accum_l+=cur_l; accum_r+=cur_r;
+  loop_i+=1;
+);
+spl0 = oversample_active ? accum_l / srate_os : accum_l;
+spl1 = oversample_active ? accum_r / srate_os : accum_r;

@@ -1,0 +1,49 @@
+desc:Tink Quad Compressor - 1176/LA2A/LA3A/SSL - Low CPU Zero Latency 4xOS Render Only
+
+slider1:0<-24,24,0.1>Input Gain dB
+slider10:0<0,3,1{1176 FB 1-sample,LA2A FB Dual,LA3A FF,SSL G Auto}>Comp Model
+slider11:-18<-40,0,0.1>Threshold dB
+slider12:4<1,20,0.1>Ratio (Disabled LA2A/LA3A)
+slider13:0.08<0.02,30,0.01>Attack ms/us
+slider14:100<10,3000,1>Release ms (Disabled LA2A/LA3A)
+slider15:0<-12,24,0.1>Makeup dB
+slider16:0<0,1,1{Off,On}>Turbo 100:1 +6dB
+slider17:0<0,1,1{Off,On}>Bypass
+slider18:0<0,100,1>Mix %
+slider20:0<-60,0,0.1>Meter GR Current
+slider21:0<-60,0,0.1>Meter GR Max 2s
+slider22:0<0,1,1{No,Yes}>isRendering
+
+@init
+pi=3.14159265359; ext_tail_size=0; srate_os=4;
+function dB2lin(db)(exp(db*0.1151292546497022842););
+function lin2dB(lin)(log(max(lin,0.000000000001))*8.68588963806;);
+function clamp(x,a,b)(x<a?a:x>b?b:x);
+oversample_active=0; comp_env_link=0; comp_gain=1; comp_gr=0; comp_gr_max=0; comp_timer=0; comp_prev_l=0; comp_prev_r=0; la2_fast=0; la2_slow=0;
+
+@slider
+oversample_active=(play_state & 4)?1:0; slider22=oversample_active;
+
+@block
+oversample_active=(play_state & 4)?1:0; srate_local=srate*(oversample_active?srate_os:1);
+
+@sample
+prev_l=spl0; prev_r=spl1; loops=oversample_active?srate_os:1; acc_l=0; acc_r=0; li=0;
+loop(loops,
+  frac=li/srate_os; cur_l=oversample_active?prev_l+(spl0-prev_l)*frac:spl0; cur_r=oversample_active?prev_r+(spl1-prev_r)*frac:spl1;
+  cur_l*=dB2lin(slider1); cur_r*=dB2lin(slider1);
+  slider17==0 ? (
+    turbo=slider16==1?2:1; in_l=cur_l*turbo; in_r=cur_r*turbo;
+    slider10==0 ? (det_l=abs(comp_prev_l); det_r=abs(comp_prev_r);) : slider10==1 ? (det_l=abs(comp_prev_l); det_r=abs(comp_prev_r);) : (det_l=abs(in_l); det_r=abs(in_r););
+    det=(det_l+det_r)*0.5;
+    slider10==0 ? (atk=clamp(slider13,0.02,0.8); rel=slider14; ac=exp(-1/(srate_local*atk/1000)); rc=exp(-1/(srate_local*rel/1000)); det>comp_env_link?comp_env_link=ac*comp_env_link+(1-ac)*det:comp_env_link=rc*comp_env_link+(1-rc)*det;) :
+    slider10==1 ? (ac=exp(-1/(srate_local*0.01)); ge=lin2dB(comp_env_link+0.000000001)-slider11; rfc=exp(-1/(srate_local*0.06)); rsm=ge>10?3500:ge>5?1500:600; rsc=exp(-1/(srate_local*rsm/1000)); det>comp_env_link?(la2_fast=ac*la2_fast+(1-ac)*det; la2_slow=ac*la2_slow+(1-ac)*det;):(la2_fast=rfc*la2_fast+(1-rfc)*det; la2_slow=rsc*la2_slow+(1-rsc)*det;); comp_env_link=la2_fast*0.5+la2_slow*0.5;) :
+    slider10==2 ? (ac=exp(-1/(srate_local*0.0015)); ge=lin2dB(comp_env_link+0.000000001)-slider11; rm=ge>10?2000:400; rc=exp(-1/(srate_local*rm/1000)); det>comp_env_link?comp_env_link=ac*comp_env_link+(1-ac)*det:comp_env_link=rc*comp_env_link+(1-rc)*det;) :
+    (slider13==0?am=0.1:slider13==1?am=0.3:slider13==2?am=1:slider13==3?am=3:slider13==4?am=10:am=30; ac=exp(-1/(srate_local*am/1000)); slider14<50?(cr=det/(comp_env_link+0.000000001); rm=cr>1.8?100:cr>1.3?300:1200;):rm=slider14; rc=exp(-1/(srate_local*rm/1000)); det>comp_env_link?comp_env_link=ac*comp_env_link+(1-ac)*det:comp_env_link=rc*comp_env_link+(1-rc)*det;);
+    ratio=slider16==1?100:(slider10==1?3.5:slider10==2?6:slider12); edb=lin2dB(comp_env_link+0.000000001); od=edb-slider11; od>0?(gdb=od*(1-1/ratio); tg=dB2lin(-gdb);):tg=1; comp_gain=comp_gain*0.92+tg*0.08; comp_gr=lin2dB(comp_gain); cur_l*=comp_gain; cur_r*=comp_gain; comp_prev_l=cur_l; comp_prev_r=cur_r; mk=dB2lin(slider15); cur_l*=mk; cur_r*=mk;
+    comp_timer+=1/srate_local; comp_timer>2?(comp_gr_max=comp_gr; comp_timer=0;):comp_gr_max=min(comp_gr_max,comp_gr); slider20=comp_gr; slider21=comp_gr_max;
+    mix=slider18/100; cur_l=cur_l*mix + prev_l*dB2lin(slider1)*(1-mix); cur_r=cur_r*mix + prev_r*dB2lin(slider1)*(1-mix);
+  );
+  acc_l+=cur_l; acc_r+=cur_r; li+=1;
+);
+spl0=oversample_active?acc_l/srate_os:acc_l; spl1=oversample_active?acc_r/srate_os:acc_r;

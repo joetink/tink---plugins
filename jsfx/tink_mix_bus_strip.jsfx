@@ -1,0 +1,248 @@
+desc:Tink Mix Bus Strip v1 - SSL Comp / Sat / EQ / Inflator / HF Tamer / Width / Clipper - Low CPU Zero Latency 4xOS Render Only
+
+slider1:0<-24,24,0.1>Input Trim dB
+
+// SSL Bus Compressor
+slider10:0<0,1,1{Off,On}>SSL Bypass
+slider11:-10<-20,10,0.1>SSL Threshold dB
+slider12:2<0,2,1{2:1,4:1,10:1}>SSL Ratio
+slider13:10<0,5,1{0.1ms,0.3ms,1ms,3ms,10ms,30ms}>SSL Attack
+slider14:2<0,5,1{0.1s,0.3s,0.6s,1.2s,Auto}>SSL Release - Auto is program dependent
+slider15:0<0,24,0.1>SSL Makeup dB
+slider16:0<0,100,1>SSL Mix %
+
+// Saturation - less extreme range 0-4 vs 0-12 in channel
+slider20:0<0,1,1{Off,On}>Sat Bypass
+slider21:0<0,1,0.01>Sat Drive 0-1 less extreme
+slider22:0<0,2,1{Neutral,Keep Low,Keep High}>Sat Focus - Softube style
+slider23:0<0,100,1>Sat Mix %
+
+// EQ - same 6-band visual
+slider30:80<20,20000,1>Band1 Freq
+slider31:0<-15,15,0.1>Band1 Gain
+slider32:1<0.1,10,0.1>Band1 Q
+slider33:0<0,2,1{Peak,LowShelf,HighShelf}>Band1 Type
+slider34:250<20,20000,1>Band2 Freq
+slider35:0<-15,15,0.1>Band2 Gain
+slider36:1<0.1,10,0.1>Band2 Q
+slider37:0<0,2,1{Peak,LowShelf,HighShelf}>Band2 Type
+slider38:1000<20,20000,1>Band3 Freq
+slider39:0<-15,15,0.1>Band3 Gain
+slider40:1<0.1,10,0.1>Band3 Q
+slider41:0<0,2,1{Peak,Notch,HighShelf}>Band3 Type
+slider42:3000<20,20000,1>Band4 Freq
+slider43:0<-15,15,0.1>Band4 Gain
+slider44:1<0.1,10,0.1>Band4 Q
+slider45:0<0,2,1{Peak,Notch,LowShelf}>Band4 Type
+slider46:8000<20,20000,1>Band5 Freq
+slider47:0<-15,15,0.1>Band5 Gain
+slider48:1<0.1,10,0.1>Band5 Q
+slider49:0<0,2,1{Peak,Notch,HighShelf}>Band5 Type
+slider50:12000<20,20000,1>Band6 Freq
+slider51:0<-15,15,0.1>Band6 Gain
+slider52:1<0.1,10,0.1>Band6 Q
+slider53:0<0,2,1{Peak,Notch,HighShelf}>Band6 Type
+slider54:0<0,1,1{Off,On}>EQ Bypass
+
+// Inflator - subtle
+slider60:0<0,1,1{Off,On}>Inflator Bypass
+slider61:0<-12,12,0.1>Inflator Input dB
+slider62:50<0,100,1>Inflator Effect % 0-100
+slider63:0<-50,50,0.5>Inflator Curve +/-50 - shapes harmonics
+slider64:0<-12,0,0.1>Inflator Output dB
+slider65:0<0,100,1>Inflator Mix %
+
+// High End Tamer - SSL Fusion HF Compressor
+slider70:0<0,1,1{Off,On}>HF Tamer Bypass
+slider71:0<-10,10,0.1>HF Tamer Threshold +/-10dB
+slider72:8000<3000,20000,1>HF Tamer Xover 3k-20kHz
+slider73:0<0,100,1>HF Tamer Mix %
+slider74:0<0,1,1{Off,On}>HF Tamer Auto Gain
+
+// Width with HPF mono keep low
+slider80:100<0,200,1>Width % 0 mono 100 stereo 200 super wide
+slider81:120<20,500,1>Width HPF Keep Mono Below Hz
+slider82:0<0,1,1{Off,On}>Width Bypass
+
+// Clipper same as channel
+slider90:0<-24,24,0.1>Clipper Drive dB
+slider91:0<-24,24,0.1>Output Trim dB
+slider92:0<0,5,1{Hard,Quintic,Cubic,Tangent,Algebraic,Arctangent}>Clipper Type
+slider93:0.5<0,1,0.01>Hard-Soft Blend
+slider94:0<0,1,1{Off,On}>Clipper Bypass
+
+// Meters
+slider100:0<-60,0,0.1>Meter SSL GR
+slider101:0<-60,0,0.1>Meter SSL GR Max 2s
+slider102:0<-60,0,0.1>Meter HF GR
+slider103:0<0,1,1{No,Yes}>isRendering
+
+@init
+pi=3.14159265359; ext_tail_size=0; srate_os=4;
+function dB2lin(db)(exp(db*0.1151292546497022842););
+function lin2dB(lin)(log(max(lin,0.000000000001))*8.68588963806;);
+function clamp(x,a,b)(x<a?a:x>b?b:x);
+oversample_active=0;
+pre_tilt_l=0; pre_tilt_r=0; sat_prev_x_l=0; sat_prev_x_r=0;
+hpf_b0=0; hpf_b1=0; hpf_b2=0; hpf_a1=0; hpf_a2=0; hpf_z1_l=0; hpf_z2_l=0; hpf_z1_r=0; hpf_z2_r=0;
+lpf_b0=0; lpf_b1=0; lpf_b2=0; lpf_a1=0; lpf_a2=0; lpf_z1_l=0; lpf_z2_l=0; lpf_z1_r=0; lpf_z2_r=0;
+eq_b0_0=1; eq_b1_0=0; eq_b2_0=0; eq_a1_0=0; eq_a2_0=0;
+eq_b0_1=1; eq_b1_1=0; eq_b2_1=0; eq_a1_1=0; eq_a2_1=0;
+eq_b0_2=1; eq_b1_2=0; eq_b2_2=0; eq_a1_2=0; eq_a2_2=0;
+eq_b0_3=1; eq_b1_3=0; eq_b2_3=0; eq_a1_3=0; eq_a2_3=0;
+eq_b0_4=1; eq_b1_4=0; eq_b2_4=0; eq_a1_4=0; eq_a2_4=0;
+eq_b0_5=1; eq_b1_5=0; eq_b2_5=0; eq_a1_5=0; eq_a2_5=0;
+eq_z1_l_0=0; eq_z2_l_0=0; eq_z1_r_0=0; eq_z2_r_0=0;
+eq_z1_l_1=0; eq_z2_l_1=0; eq_z1_r_1=0; eq_z2_r_1=0;
+eq_z1_l_2=0; eq_z2_l_2=0; eq_z1_r_2=0; eq_z2_r_2=0;
+eq_z1_l_3=0; eq_z2_l_3=0; eq_z1_r_3=0; eq_z2_r_3=0;
+eq_z1_l_4=0; eq_z2_l_4=0; eq_z1_r_4=0; eq_z2_r_4=0;
+eq_z1_l_5=0; eq_z2_l_5=0; eq_z1_r_5=0; eq_z2_r_5=0;
+ssl_env=0; ssl_gain=1; ssl_gr=0; ssl_gr_max=0; ssl_timer=0;
+hf_env=0; hf_gain=1; hf_gr=0; hf_gr_max=0; hf_timer=0;
+hf_xover_b0=0; hf_xover_b1=0; hf_xover_b2=0; hf_xover_a1=0; hf_xover_a2=0; hf_xover_z1=0; hf_xover_z2=0;
+width_mid=0; width_side=0;
+clip_prev_x_l=0; clip_prev_x_r=0;
+clip_hist_size=800; clip_hist_write=0; clip_hist_offset=0;
+i=0; loop(800, mem[i]=0; i+=1;);
+function dsat(x)(x/(1+abs(x)););
+function dsat_ad_aa(x,prev_x) local(Fx,Fx1,denom)(denom=x-prev_x; abs(denom)<0.0000001 ? dsat((x+prev_x)*0.5) : ( Fx=(abs(x)-log(1+abs(x)))*(x>=0?1:-1); Fx1=(abs(prev_x)-log(1+abs(prev_x)))*(prev_x>=0?1:-1); (Fx-Fx1)/denom ););
+function calc_hp(freq,Q,srate) local(w0,cs,sn,al,b0,b1,b2,a0,a1,a2)(w0=2*pi*freq/srate; cs=cos(w0); sn=sin(w0); al=sn/(2*Q); b0=(1+cs)*0.5; b1=-(1+cs); b2=b0; a0=1+al; a1=-2*cs; a2=1-al; hpf_b0=b0/a0; hpf_b1=b1/a0; hpf_b2=b2/a0; hpf_a1=a1/a0; hpf_a2=a2/a0;);
+function calc_lp(freq,Q,srate) local(w0,cs,sn,al,b0,b1,b2,a0,a1,a2)(w0=2*pi*freq/srate; cs=cos(w0); sn=sin(w0); al=sn/(2*Q); b0=(1-cs)*0.5; b1=1-cs; b2=b0; a0=1+al; a1=-2*cs; a2=1-al; lpf_b0=b0/a0; lpf_b1=b1/a0; lpf_b2=b2/a0; lpf_a1=a1/a0; lpf_a2=a2/a0;);
+function calc_peq0(freq,gainDB,Q,srate) local(A,w0,cs,sn,al,b0,b1,b2,a0,a1,a2)(A=exp(gainDB/40*log(10)); w0=2*pi*freq/srate; cs=cos(w0); sn=sin(w0); al=sn/(2*Q); b0=1+al*A; b1=-2*cs; b2=1-al*A; a0=1+al/A; a1=-2*cs; a2=1-al/A; eq_b0_0=b0/a0; eq_b1_0=b1/a0; eq_b2_0=b2/a0; eq_a1_0=a1/a0; eq_a2_0=a2/a0;);
+function calc_peq1(freq,gainDB,Q,srate) local(A,w0,cs,sn,al,b0,b1,b2,a0,a1,a2)(A=exp(gainDB/40*log(10)); w0=2*pi*freq/srate; cs=cos(w0); sn=sin(w0); al=sn/(2*Q); b0=1+al*A; b1=-2*cs; b2=1-al*A; a0=1+al/A; a1=-2*cs; a2=1-al/A; eq_b0_1=b0/a0; eq_b1_1=b1/a0; eq_b2_1=b2/a0; eq_a1_1=a1/a0; eq_a2_1=a2/a0;);
+function calc_peq2(freq,gainDB,Q,srate) local(A,w0,cs,sn,al,b0,b1,b2,a0,a1,a2)(A=exp(gainDB/40*log(10)); w0=2*pi*freq/srate; cs=cos(w0); sn=sin(w0); al=sn/(2*Q); slider41==1 ? (b0=1; b1=-2*cs; b2=1; a0=1+al; a1=-2*cs; a2=1-al;) : (b0=1+al*A; b1=-2*cs; b2=1-al*A; a0=1+al/A; a1=-2*cs; a2=1-al/A;); eq_b0_2=b0/a0; eq_b1_2=b1/a0; eq_b2_2=b2/a0; eq_a1_2=a1/a0; eq_a2_2=a2/a0;);
+function calc_peq3(freq,gainDB,Q,srate) local(A,w0,cs,sn,al,b0,b1,b2,a0,a1,a2)(A=exp(gainDB/40*log(10)); w0=2*pi*freq/srate; cs=cos(w0); sn=sin(w0); al=sn/(2*Q); slider45==1 ? (b0=1; b1=-2*cs; b2=1; a0=1+al; a1=-2*cs; a2=1-al;) : (b0=1+al*A; b1=-2*cs; b2=1-al*A; a0=1+al/A; a1=-2*cs; a2=1-al/A;); eq_b0_3=b0/a0; eq_b1_3=b1/a0; eq_b2_3=b2/a0; eq_a1_3=a1/a0; eq_a2_3=a2/a0;);
+function calc_peq4(freq,gainDB,Q,srate) local(A,w0,cs,sn,al,b0,b1,b2,a0,a1,a2)(A=exp(gainDB/40*log(10)); w0=2*pi*freq/srate; cs=cos(w0); sn=sin(w0); al=sn/(2*Q); slider49==1 ? (b0=1; b1=-2*cs; b2=1; a0=1+al; a1=-2*cs; a2=1-al;) : (b0=1+al*A; b1=-2*cs; b2=1-al*A; a0=1+al/A; a1=-2*cs; a2=1-al/A;); eq_b0_4=b0/a0; eq_b1_4=b1/a0; eq_b2_4=b2/a0; eq_a1_4=a1/a0; eq_a2_4=a2/a0;);
+function calc_peq5(freq,gainDB,Q,srate) local(A,w0,cs,sn,al,b0,b1,b2,a0,a1,a2)(A=exp(gainDB/40*log(10)); w0=2*pi*freq/srate; cs=cos(w0); sn=sin(w0); al=sn/(2*Q); slider53==1 ? (b0=1; b1=-2*cs; b2=1; a0=1+al; a1=-2*cs; a2=1-al;) : (b0=1+al*A; b1=-2*cs; b2=1-al*A; a0=1+al/A; a1=-2*cs; a2=1-al/A;); eq_b0_5=b0/a0; eq_b1_5=b1/a0; eq_b2_5=b2/a0; eq_a1_5=a1/a0; eq_a2_5=a2/a0;);
+function calc_hf_xover(freq,srate) local(w0,cs,sn,al,b0,b1,b2,a0,a1,a2)(w0=2*pi*freq/srate; cs=cos(w0); sn=sin(w0); al=sn/(2*0.707); b0=(1-cs)*0.5; b1=1-cs; b2=b0; a0=1+al; a1=-2*cs; a2=1-al; hf_xover_b0=b0/a0; hf_xover_b1=b1/a0; hf_xover_b2=b2/a0; hf_xover_a1=a1/a0; hf_xover_a2=a2/a0;);
+function clip_shape(x,type) local(y,absx)(type==0 ? (y=x>1?1:x<-1?-1:x;) : type==1 ? (absx=abs(x); absx>1?y=(x>0?1:-1):y=x-0.2*x*x*x*x*x;) : type==2 ? (absx=abs(x); absx>1?y=(x>0?1:-1):y=x-0.333333*x*x*x;) : type==3 ? (y=tan(x*0.785398)*0.6; y>1?1:y<-1?-1:y;) : type==4 ? (y=x/sqrt(1+x*x);) : (y=atan(x)*0.636619772367;); y;);
+function clip_F(x,type) local(F)(type==0 ? (F=abs(x)<=1?0.5*x*x:(abs(x)-0.5);) : type==1 ? (F=0.5*x*x-0.0333333*x*x*x*x*x*x;) : type==2 ? (F=0.5*x*x-0.0833333*x*x*x*x;) : type==4 ? (F=sqrt(1+x*x);) : type==5 ? (F=x*atan(x)*0.6366197-0.3183098*log(1+x*x);) : (F=0;); F;);
+function clip_ad_aa(x,prev_x,type) local(denom,Fx,Fx1)(denom=x-prev_x; abs(denom)<0.0000001 ? clip_shape((x+prev_x)*0.5,type) : ( type==0||type==1||type==2||type==4||type==5 ? (Fx=clip_F(x,type); Fx1=clip_F(prev_x,type); (Fx-Fx1)/denom;) : ((clip_shape(x,type)+clip_shape(prev_x,type))*0.5) ););
+
+@slider
+oversample_active=(play_state & 4)?1:0; slider103=oversample_active; srate_calc=srate*(oversample_active?srate_os:1);
+calc_peq0(slider30,slider31,slider32,srate_calc); calc_peq1(slider34,slider35,slider36,srate_calc); calc_peq2(slider38,slider39,slider40,srate_calc); calc_peq3(slider42,slider43,slider44,srate_calc); calc_peq4(slider46,slider47,slider48,srate_calc); calc_peq5(slider50,slider51,slider52,srate_calc);
+calc_hf_xover(slider72,srate_calc);
+
+@block
+oversample_active=(play_state & 4)?1:0; srate_local=srate*(oversample_active?srate_os:1);
+
+@sample
+prev_in_l=spl0; prev_in_r=spl1; samples_loop=oversample_active?srate_os:1; accum_l=0; accum_r=0; loop_i=0;
+loop(samples_loop,
+  frac=loop_i/srate_os; cur_l=oversample_active?prev_in_l+(spl0-prev_in_l)*frac:spl0; cur_r=oversample_active?prev_in_r+(spl1-prev_in_r)*frac:spl1;
+  cur_l*=dB2lin(slider1); cur_r*=dB2lin(slider1);
+  // SSL Comp
+  slider10==0 ? (
+    det=max(abs(cur_l),abs(cur_r));
+    slider13==0?atk_ms=0.1:slider13==1?atk_ms=0.3:slider13==2?atk_ms=1:slider13==3?atk_ms=3:slider13==4?atk_ms=10:atk_ms=30;
+    slider14==0?rel_ms=100:slider14==1?rel_ms=300:slider14==2?rel_ms=600:slider14==3?rel_ms=1200:rel_ms=-1;
+    atk_c=exp(-1/(srate_local*atk_ms/1000));
+    rel_ms==-1 ? ( crest=det/(ssl_env+0.000000001); rel_ms=crest>1.8?100:crest>1.3?300:1200; ) : rel_ms=rel_ms;
+    rel_c=exp(-1/(srate_local*rel_ms/1000));
+    det>ssl_env ? ssl_env=atk_c*ssl_env+(1-atk_c)*det : ssl_env=rel_c*ssl_env+(1-rel_c)*det;
+    slider12==0?ratio=2:slider12==1?ratio=4:ratio=10;
+    thresh_lin=dB2lin(slider11); env_db=lin2dB(ssl_env+0.000000001); thresh_db=slider11; over_db=env_db-thresh_db; over_db>0?(gr_db=over_db*(1-1/ratio); target=dB2lin(-gr_db);):target=1;
+    ssl_gain=ssl_gain*0.92+target*0.08; ssl_gr=lin2dB(ssl_gain); cur_l*=ssl_gain; cur_r*=ssl_gain; mk=dB2lin(slider15); cur_l*=mk; cur_r*=mk;
+    ssl_timer+=1/srate_local; ssl_timer>2?(ssl_gr_max=ssl_gr; ssl_timer=0;):ssl_gr_max=min(ssl_gr_max,ssl_gr); slider100=ssl_gr; slider101=ssl_gr_max;
+    mix=slider16/100; cur_l=cur_l*mix + (spl0*dB2lin(slider1))* (1-mix); cur_r=cur_r*mix + (spl1*dB2lin(slider1))*(1-mix);
+  );
+  // Saturation less extreme: drive 0-1 maps to 0-4 not 0-12
+  slider20==0 ? (
+    drive=slider21*4; lp_coeff=exp(-2*pi*800/srate_local); pre_tilt_l=pre_tilt_l+lp_coeff*(cur_l-pre_tilt_l); hp_l=cur_l-pre_tilt_l; pre_tilt_r=pre_tilt_r+lp_coeff*(cur_r-pre_tilt_r); hp_r=cur_r-pre_tilt_r;
+    slider22==1 ? (sat_in_l=hp_l*(1+drive)+pre_tilt_l*0.2; sat_in_r=hp_r*(1+drive)+pre_tilt_r*0.2;) : slider22==2 ? (sat_in_l=pre_tilt_l*(1+drive)+hp_l*0.2; sat_in_r=pre_tilt_r*(1+drive)+hp_r*0.2;) : (sat_in_l=cur_l*(1+drive); sat_in_r=cur_r*(1+drive););
+    y_l=dsat_ad_aa(sat_in_l,sat_prev_x_l); y_r=dsat_ad_aa(sat_in_r,sat_prev_x_r); sat_prev_x_l=sat_in_l; sat_prev_x_r=sat_in_r;
+    blend=slider23/100; cur_l=cur_l*(1-blend*0.3)+y_l*blend*0.6; cur_r=cur_r*(1-blend*0.3)+y_r*blend*0.6;
+  );
+  // EQ
+  slider54==0 ? (
+    tmp=cur_l*eq_b0_0+eq_z1_l_0; eq_z1_l_0=cur_l*eq_b1_0+eq_z2_l_0-tmp*eq_a1_0; eq_z2_l_0=cur_l*eq_b2_0-tmp*eq_a2_0; cur_l=tmp;
+    tmp=cur_r*eq_b0_0+eq_z1_r_0; eq_z1_r_0=cur_r*eq_b1_0+eq_z2_r_0-tmp*eq_a1_0; eq_z2_r_0=cur_r*eq_b2_0-tmp*eq_a2_0; cur_r=tmp;
+    tmp=cur_l*eq_b0_1+eq_z1_l_1; eq_z1_l_1=cur_l*eq_b1_1+eq_z2_l_1-tmp*eq_a1_1; eq_z2_l_1=cur_l*eq_b2_1-tmp*eq_a2_1; cur_l=tmp;
+    tmp=cur_r*eq_b0_1+eq_z1_r_1; eq_z1_r_1=cur_r*eq_b1_1+eq_z2_r_1-tmp*eq_a1_1; eq_z2_r_1=cur_r*eq_b2_1-tmp*eq_a2_1; cur_r=tmp;
+    tmp=cur_l*eq_b0_2+eq_z1_l_2; eq_z1_l_2=cur_l*eq_b1_2+eq_z2_l_2-tmp*eq_a1_2; eq_z2_l_2=cur_l*eq_b2_2-tmp*eq_a2_2; cur_l=tmp;
+    tmp=cur_r*eq_b0_2+eq_z1_r_2; eq_z1_r_2=cur_r*eq_b1_2+eq_z2_r_2-tmp*eq_a1_2; eq_z2_r_2=cur_r*eq_b2_2-tmp*eq_a2_2; cur_r=tmp;
+    tmp=cur_l*eq_b0_3+eq_z1_l_3; eq_z1_l_3=cur_l*eq_b1_3+eq_z2_l_3-tmp*eq_a1_3; eq_z2_l_3=cur_l*eq_b2_3-tmp*eq_a2_3; cur_l=tmp;
+    tmp=cur_r*eq_b0_3+eq_z1_r_3; eq_z1_r_3=cur_r*eq_b1_3+eq_z2_r_3-tmp*eq_a1_3; eq_z2_r_3=cur_r*eq_b2_3-tmp*eq_a2_3; cur_r=tmp;
+    tmp=cur_l*eq_b0_4+eq_z1_l_4; eq_z1_l_4=cur_l*eq_b1_4+eq_z2_l_4-tmp*eq_a1_4; eq_z2_l_4=cur_l*eq_b2_4-tmp*eq_a2_4; cur_l=tmp;
+    tmp=cur_r*eq_b0_4+eq_z1_r_4; eq_z1_r_4=cur_r*eq_b1_4+eq_z2_r_4-tmp*eq_a1_4; eq_z2_r_4=cur_r*eq_b2_4-tmp*eq_a2_4; cur_r=tmp;
+    tmp=cur_l*eq_b0_5+eq_z1_l_5; eq_z1_l_5=cur_l*eq_b1_5+eq_z2_l_5-tmp*eq_a1_5; eq_z2_l_5=cur_l*eq_b2_5-tmp*eq_a2_5; cur_l=tmp;
+    tmp=cur_r*eq_b0_5+eq_z1_r_5; eq_z1_r_5=cur_r*eq_b1_5+eq_z2_r_5-tmp*eq_a1_5; eq_z2_r_5=cur_r*eq_b2_5-tmp*eq_a2_5; cur_r=tmp;
+  );
+  // Inflator subtle
+  slider60==0 ? (
+    in_dB=slider61; eff=slider62/100; curve=slider63/50;
+    // simple inflator model: waveshape + curve
+    drive_in_l=cur_l*dB2lin(in_dB); drive_in_r=cur_r*dB2lin(in_dB);
+    // curve shapes harmonic: positive = more even, negative = more odd
+    // Use: y = x + eff * (sin(x*pi*0.5)*curve + tanh(x*2)*(1-curve))
+    x=drive_in_l; shape_l = sin(x*1.570796)*0.5 + (x/(1+abs(x)))*0.5; shape_l = x*(1-eff*0.3) + shape_l*eff*0.6;
+    x=drive_in_r; shape_r = sin(x*1.570796)*0.5 + (x/(1+abs(x)))*0.5; shape_r = x*(1-eff*0.3) + shape_r*eff*0.6;
+    // curve mod
+    shape_l += curve*0.1*shape_l*shape_l; shape_r += curve*0.1*shape_r*shape_r;
+    out_l=shape_l*dB2lin(slider64); out_r=shape_r*dB2lin(slider64);
+    mix=slider65/100; cur_l=cur_l*(1-mix)+out_l*mix; cur_r=cur_r*(1-mix)+out_r*mix;
+  );
+  // HF Tamer - SSL Fusion style
+  slider70==0 ? (
+    side=(cur_l+cur_r)*0.5;
+    // highpass at xover to get HF only
+    tmp=side*hf_xover_b0+hf_xover_z1; hf_xover_z1=side*hf_xover_b1+hf_xover_z2-tmp*hf_xover_a1; hf_xover_z2=side*hf_xover_b2-tmp*hf_xover_a2; hf_in=tmp;
+    det=abs(hf_in); atk_c=exp(-1/(srate_local*0.005)); rel_c=exp(-1/(srate_local*0.1));
+    det>hf_env ? hf_env=atk_c*hf_env+(1-atk_c)*det : hf_env=rel_c*hf_env+(1-rel_c)*det;
+    thresh_lin=dB2lin(slider71); // +/-10dB threshold
+    hf_env>thresh_lin ? ( over_db=lin2dB(hf_env)-slider71; gr_db=-over_db*0.8; target=dB2lin(gr_db); ) : target=1;
+    hf_gain=hf_gain*0.9+target*0.1; hf_gr=lin2dB(hf_gain);
+    // tape-like roll-off: soft lowpass on compressed HF
+    hf_comp = hf_in*hf_gain; hf_comp = hf_comp*0.7 + hf_xover_z1*0.3;
+    // mix HF compressed back with full
+    low_part = side - hf_in; out_side = low_part + hf_comp;
+    // auto gain
+    slider74==1 ? ( mk=dB2lin(-hf_gr*0.5); out_side*=mk; );
+    // reconstruct stereo with HF tamed side
+    // simple: apply HF gain to side signal only for transparency
+    mid=(cur_l+cur_r)*0.5; side_orig=(cur_l-cur_r)*0.5;
+    // HF tamer affects side+mid HF? For bus, we tame overall HF by hf_gain on HF band
+    hf_tame_mix=slider73/100;
+    cur_l = (mid + side_orig)*(1-hf_tame_mix*0.5) + (mid*hf_gain*0.2 + side_orig + hf_comp*0.8)*hf_tame_mix*0.5;
+    cur_r = (mid - side_orig)*(1-hf_tame_mix*0.5) + (mid*hf_gain*0.2 - side_orig + hf_comp*0.8)*hf_tame_mix*0.5;
+    hf_timer+=1/srate_local; hf_timer>2 ? (hf_gr_max=hf_gr; hf_timer=0;) : hf_gr_max=min(hf_gr_max,hf_gr); slider102=hf_gr;
+  );
+  // Width with HPF mono keep low
+  slider82==0 ? (
+    // split low mono below HPF
+    hpf_c = exp(-2*pi*slider81/srate_local);
+    // low mono: LP at HPF
+    // simple mid/side
+    mid=(cur_l+cur_r)*0.5; side=(cur_l-cur_r)*0.5;
+    // keep low mono: highpass side at HPF freq (remove low from side)
+    // one-pole HP for side low
+    // using same hpf coeff as low mono keeper
+    // we keep side low below slider81 mono
+    side_hp = side - (width_mid*0); // placeholder using state
+    // Implement one-pole HP: y = x - lp
+    width_mid = width_mid + hpf_c*(mid - width_mid); // actually LP for mid low
+    // For width, we need to LP side low and keep mono
+    // Side HP: remove lows from side
+    width_side = width_side + (1-hpf_c)*(side - width_side); // LP of side
+    side_low = width_side;
+    side_high = side - side_low;
+    width_factor = slider80/100;
+    // keep side_low mono = 0 if we want mono below HPF, so side = side_high*width_factor
+    side_out = side_high*width_factor;
+    cur_l = mid + side_out;
+    cur_r = mid - side_out;
+  );
+  // Clipper same as channel
+  slider94==0 ? (
+    drive_in_l=cur_l*dB2lin(slider90); drive_in_r=cur_r*dB2lin(slider90); type=slider92; hs=slider93;
+    clipped_l=clip_ad_aa(drive_in_l,clip_prev_x_l,type); hard_l=drive_in_l>1?1:drive_in_l<-1?-1:drive_in_l; y_l=hard_l*(1-hs)+clipped_l*hs;
+    clipped_r=clip_ad_aa(drive_in_r,clip_prev_x_r,type); hard_r=drive_in_r>1?1:drive_in_r<-1?-1:drive_in_r; y_r=hard_r*(1-hs)+clipped_r*hs;
+    clip_prev_x_l=drive_in_l; clip_prev_x_r=drive_in_r;
+    oversample_active==0 ? (mem[clip_hist_offset+clip_hist_write]=(abs(y_l)+abs(y_r))*0.5; clip_hist_write=(clip_hist_write+1)%clip_hist_size;);
+    cur_l=y_l*dB2lin(slider91); cur_r=y_r*dB2lin(slider91);
+  ) : ( cur_l*=dB2lin(slider91); cur_r*=dB2lin(slider91); );
+  accum_l+=cur_l; accum_r+=cur_r; loop_i+=1;
+);
+spl0=oversample_active?accum_l/srate_os:accum_l; spl1=oversample_active?accum_r/srate_os:accum_r;
