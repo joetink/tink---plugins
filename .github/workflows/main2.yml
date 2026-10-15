@@ -1,0 +1,25 @@
+name: Build VST3
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release -j 4
+
+      - name: Upload VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: JT500-Windows-VST3
+          path: |
+            build/JT500Strip_artefacts/Release/VST3/JT-500 Strip.vst3
+            build/**/JT500Strip_artefacts/**/*
